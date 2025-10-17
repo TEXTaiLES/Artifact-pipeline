@@ -1,0 +1,159 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "version": "1.0.0",
+        "title": "Artifact Upload API",
+        "description": "API for uploading artifacts to MinIO with Kafka event streaming and Postgres persistence"
+    },
+    "servers": [
+        {
+            "url": "http://localhost:5000",
+            "description": "Local development server"
+        }
+    ],
+    "paths": {
+        "/artifacts": {
+            "post": {
+                "tags": ["Artifacts"],
+                "summary": "Upload an artifact",
+                "description": "Uploads a binary file to MinIO and sends metadata to Kafka for persistence in Postgres",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ArtifactInput"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Artifact uploaded successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ArtifactResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input (e.g., no file provided)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Server error (e.g., MinIO or Kafka failure)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "tags": ["Health"],
+                "summary": "Health check",
+                "description": "Returns the health status of the API",
+                "responses": {
+                    "200": {
+                        "description": "API is healthy",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HealthResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "ArtifactInput": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "Binary file to upload"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional title for the artifact"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Optional filename (defaults to uploaded file name)"
+                    },
+                    "uploaded_by": {
+                        "type": "string",
+                        "description": "Optional user ID of the uploader (defaults to 'user123')"
+                    }
+                }
+            },
+            "ArtifactResponse": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "Success message"
+                    },
+                    "artifact_id": {
+                        "type": "string",
+                        "description": "Unique UUID identifier for the artifact"
+                    },
+                    "location": {
+                        "type": "string",
+                        "description": "S3-compatible URL of the uploaded file"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Name of the uploaded file"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Title of the artifact"
+                    }
+                }
+            },
+            "HealthResponse": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Health status of the API"
+                    },
+                    "timestamp": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "Current timestamp in ISO format"
+                    }
+                }
+            },
+            "Error": {
+                "type": "object",
+                "properties": {
+                    "error": {
+                        "type": "string",
+                        "description": "Error message"
+                    }
+                }
+            }
+        }
+    }
+}
