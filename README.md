@@ -12,9 +12,9 @@ The system consists of the following components:
 - **MinIO**: Stores uploaded files in an S3-compatible bucket (`artifacts`).
 - **Artifact Consumer**: Consumes notifications from the `artifact_uploaded` topic and updates timestamps in Postgres.
 
-![alt text](image.png)
+![Architecture](textailesdocker/image.png)
 
-![alt text](image-1.png)
+![Workflow](textailesdocker/image-1.png)
 
 ## Prerequisites
 
