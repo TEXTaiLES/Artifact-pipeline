@@ -1,0 +1,11 @@
+{
+  "myimage.png": {
+    "title": "Main Campus Building",
+    "drone_id": "Drone-Alpha-007"
+  },
+  "myimage2.png": {
+    "title": "Solar Panel Array 3",
+    "drone_id": "Drone-Juliet-009",
+    "uploaded_by": "drone_ops_team"
+  }
+}

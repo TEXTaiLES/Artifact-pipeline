@@ -8,6 +8,7 @@ from minio import Minio
 from minio.error import S3Error
 import io
 from flasgger import Swagger
+import psycopg2
 
 app = Flask(__name__)
 Swagger(app, config={
@@ -52,6 +53,13 @@ def init_minio_bucket():
 
 init_minio_bucket()
 
+# Postgres configuration for accessing the database
+PG_HOST = 'postgres'
+PG_PORT = '5432'
+PG_DB = 'mydb'
+PG_USER = 'admin'
+PG_PASSWORD = 'admin123'
+
 # Kafka configuration for event streaming
 KAFKA_BROKER = 'kafka:29092'  # Use Docker service name
 ARTIFACTS_TOPIC = 'artifacts'
@@ -71,6 +79,10 @@ def send_to_kafka_with_schema(topic, key, value):
                     {"type": "string", "optional": True, "field": "title"},
                     {"type": "string", "optional": False, "field": "filename"},
                     {"type": "string", "optional": False, "field": "location"},
+
+                    # New dummy datatype added
+                    {"type": "string", "optional": True, "field": "drone_id"},
+
                     {"type": "string", "optional": True, "field": "uploaded_by"},
                     {
                         "type": "int64",
@@ -85,7 +97,7 @@ def send_to_kafka_with_schema(topic, key, value):
             },
             "payload": value
         }
-        
+
         producer.produce(
             topic=topic,
             key=str(key).encode('utf-8'),
@@ -115,71 +127,222 @@ def send_to_kafka_simple(topic, key, value):
 
 class ArtifactResource(Resource):
     def post(self):
-        """Handle file upload and publish artifact metadata to Kafka."""
-        if 'file' not in request.files:
-            return {'error': 'No file provided'}, 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return {'error': 'No file selected'}, 400
+        """Enhanced post method, allowing single-file
+        or batch uploads using JSON metadata mapping"""
 
-        # Extract metadata from request
-        title = request.form.get('title', '')
-        uploaded_by = request.form.get('uploaded_by', 'user123')
-        filename = request.form.get('filename', file.filename)
+        files = request.files.getlist('file')
+        if not files or files[0].filename == '':
+            return {'error': 'No file(s) provided'}, 400
 
-        # Generate unique artifact ID and timestamp
+        uploaded_artifacts = []
+
+        # If a metadata map is provided, proceed with batch upload
+        if 'metadata_map' in request.form:
+            metadata_map_str = request.form.get('metadata_map')
+            try:
+                metadata_map = json.loads(metadata_map_str)
+            except json.JSONDecodeError:
+                return {'error': "Invalid JSON in 'metadata_map' field"}, 400
+
+            for file in files:
+                filename = file.filename
+                metadata = metadata_map.get(filename, {}) # Get this file's specific metadata
+
+                title = metadata.get('title', filename)
+                uploaded_by = metadata.get('uploaded_by', 'user123')
+                drone_id = metadata.get('drone_id', 'unknown_drone')
+
+                try:
+                    artifact_id, location = self.upload_file_to_kafka(
+                        file, filename, title, uploaded_by, drone_id
+                    )
+                    uploaded_artifacts.append({
+                        "artifact_id": artifact_id,
+                        "location": location,
+                        "filename": filename,
+                        "title": title
+                    })
+                except Exception as e:
+                    app.logger.error(f"Failed to upload file {filename}: {str(e)}")
+
+        # If no metadata map provided, assume single-file upload
+        else:
+            title = request.form.get('title', '')
+            uploaded_by = request.form.get('uploaded_by', 'user123')
+            drone_id = request.form.get('drone_id', 'unknown_drone')
+
+            for file in files:
+                filename = file.filename
+
+                try:
+                    artifact_id, location = self.upload_file_to_kafka(
+                        file, filename, (title or filename), uploaded_by, drone_id
+                    )
+                    uploaded_artifacts.append({
+                        "artifact_id": artifact_id,
+                        "location": location,
+                        "filename": filename
+                    })
+                except Exception as e:
+                    app.logger.error(f"Failed to upload file {filename}: {str(e)}")
+
+        if not uploaded_artifacts:
+            return {'error': 'All file uploads in the batch failed'}, 500
+
+        return {
+            "message": f"Successfully processed and uploaded {len(uploaded_artifacts)} file(s)",
+            "uploaded_files": uploaded_artifacts
+        }, 201
+
+
+    def upload_file_to_kafka(self, file, filename, title, uploaded_by, drone_id):
+        """
+        A helper function to upload one file and send its Kafka messages.
+        (This is the logic that was repeated in our if/else block)
+        """
         artifact_id = str(uuid.uuid4())
         timestamp_millis = int(datetime.now(timezone.utc).timestamp() * 1000)
 
+        # 1. Upload to MinIO
+        file_data = file.read()
+        file_stream = io.BytesIO(file_data)
+        object_name = f"{artifact_id}/{filename}"
+
+        minio_client.put_object(
+            MINIO_BUCKET,
+            object_name,
+            file_stream,
+            len(file_data),
+            content_type=file.content_type or 'application/octet-stream'
+        )
+
+        # 2. Create metadata record
+        location = f"s3://{MINIO_BUCKET}/{object_name}"
+        artifact_record = {
+            "artifact_id": artifact_id,
+            "title": title,
+            "filename": filename,
+            "location": location,
+            "uploaded_by": uploaded_by,
+            "timestamp": timestamp_millis,
+            "drone_id": drone_id
+        }
+
+        # 3. Send metadata to 'artifacts' topic
+        if not send_to_kafka_with_schema(ARTIFACTS_TOPIC, artifact_id, artifact_record):
+            # Raise an error to be caught by the 'post' method
+            raise Exception(f"Failed to send artifact {artifact_id} to Kafka")
+
+        # 4. Send notification
+        notification_event = {
+            "artifact_id": artifact_id,
+            "event_type": "artifact_uploaded",
+            "event_timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        send_to_kafka_simple(ARTIFACT_UPLOADED_TOPIC, artifact_id, notification_event)
+
+        # 5. Return the new ID and location
+        return artifact_id, location
+
+    def get(self):
+        """Handle GET requests to fetch all artifacts,
+        with optional filtering and field selection."""
+
+        conn = None
         try:
-            # Upload file to MinIO
-            file_data = file.read()
-            file_stream = io.BytesIO(file_data)
-            object_name = f"{artifact_id}/{filename}"
-            minio_client.put_object(
-                MINIO_BUCKET,
-                object_name,
-                file_stream,
-                len(file_data),
-                content_type=file.content_type or 'application/octet-stream'
+
+            # Handle requested fields
+            filters = request.args.copy()
+            sql_select = "SELECT * FROM artifacts" # Default to selecting everything
+
+            if 'fields' in filters:
+                field_list_str = filters.pop('fields')
+
+                # Sanitize SQL query for safety
+                safe_fields = [f for f in field_list_str.split(',') if f.replace('_', '').isalnum()]
+                if safe_fields:
+                    sql_select = f"SELECT {', '.join(safe_fields)} FROM artifacts"
+
+            # Handle filtering
+            sql_query = sql_select
+            query_params = []
+
+            if filters:
+                sql_query += " WHERE "
+                filter_clauses = []
+
+                for key, value in filters.items():
+                    if key in ['drone_id', 'uploaded_by', 'title']:
+                        filter_clauses.append(f"{key} = %s")
+                        query_params.append(value)
+
+                sql_query += " AND ".join(filter_clauses)
+
+            # Connect to Postgres
+            conn = psycopg2.connect(
+                host=PG_HOST,
+                port=PG_PORT,
+                database=PG_DB,
+                user=PG_USER,
+                password=PG_PASSWORD
             )
+            cur = conn.cursor()
 
-            # Create artifact metadata
-            location = f"s3://{MINIO_BUCKET}/{object_name}"
-            artifact_record = {
-                "artifact_id": artifact_id,
-                "title": title or filename,
-                "filename": filename,
-                "location": location,
-                "uploaded_by": uploaded_by,
-                "timestamp": timestamp_millis
-            }
+            # Execute full query after filtering
+            cur.execute(sql_query, query_params)
+            artifacts = cur.fetchall()
+            colnames = [desc[0] for desc in cur.description]
 
-            # Send metadata to Kafka artifacts topic
-            if not send_to_kafka_with_schema(ARTIFACTS_TOPIC, artifact_id, artifact_record):
-                return {'error': 'Failed to send artifact to Kafka'}, 500
+            cur.close()
+            conn.close()
 
-            # Send notification to artifact_uploaded topic
-            notification_event = {
-                "artifact_id": artifact_id,
-                "event_type": "artifact_uploaded",
-                "event_timestamp": datetime.now(timezone.utc).isoformat()
-            }
-            send_to_kafka_simple(ARTIFACT_UPLOADED_TOPIC, artifact_id, notification_event)
+            # Format into JSON
+            result = []
+            for row in artifacts:
+                result.append(dict(zip(colnames, row)))
+            return jsonify(result)
 
-            return {
-                "message": "Artifact uploaded successfully",
-                "artifact_id": artifact_id,
-                "location": location,
-                "filename": filename,
-                "title": title or filename
-            }, 201
-
-        except S3Error as e:
-            return {'error': f'MinIO upload failed: {str(e)}'}, 500
         except Exception as e:
-            return {'error': f'Upload failed: {str(e)}'}, 500
+            if conn:
+                conn.close()
+            return {'error': str(e)}, 500
+
+class ArtifactItemResource(Resource):
+    def get(self, artifact_id):
+        """Handle GET requests for a single artifact by its ID."""
+        conn = None
+        try:
+            conn = psycopg2.connect(
+                host=PG_HOST,
+                port=PG_PORT,
+                database=PG_DB,
+                user=PG_USER,
+                password=PG_PASSWORD
+            )
+            cur = conn.cursor()
+
+            # Only select single item
+            cur.execute("SELECT * FROM artifacts WHERE artifact_id = %s", (artifact_id,))
+
+            # Fetch only one row
+            artifact = cur.fetchone()
+
+            cur.close()
+            conn.close()
+
+            if artifact:
+                # If we found it, format it as JSON (like before)
+                colnames = [desc[0] for desc in cur.description]
+                result = dict(zip(colnames, artifact))
+                return jsonify(result)
+            else:
+                # If no row was found, return a 404 error
+                return {'error': 'Artifact not found'}, 404
+
+        except Exception as e:
+            if conn:
+                conn.close()
+            return {'error': str(e)}, 500
 
 # Serve the static OpenAPI spec at /swagger.json
 @app.route('/swagger.json')
@@ -188,6 +351,7 @@ def swagger_spec():
 
 # Register API routes
 api.add_resource(ArtifactResource, '/artifacts')
+api.add_resource(ArtifactItemResource, '/artifacts/<string:artifact_id>')
 
 @app.route('/health')
 def health_check():

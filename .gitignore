@@ -1,0 +1,5 @@
+.DS_Store
+
+textailesdocker/minio_data/
+textailesdocker/pg_data/
+textailesdocker/plugins/
