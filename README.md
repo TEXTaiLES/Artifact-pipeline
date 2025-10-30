@@ -49,7 +49,7 @@ textailesdocker/
    ```
 
 2. **Start the services**
-  
+
    ```bash
    cd textailesdocker
    sudo docker-compose up --build -d
@@ -79,23 +79,116 @@ textailesdocker/
        http://localhost:8083/connectors
      ```
    - Check the connector status:
-   
+
      ```bash
-     curl http://localhost:8083/connectors/artifact-sink/status 
+     curl http://localhost:8083/connectors/artifact-sink/status
      ```
-6. **Test the API**
+6. **API Endpoints [UPDATED]**
 
-    - **Upload an artifact**:
+    The API provides endpoints for uploading (producing) and querying (consuming) artifacts.
+
+    #### Produce Data (Upload) `POST /artifacts`
+
+    This endpoint handles file uploads. It supports two modes:
+
+      **1. Single File Upload**
+
+      Upload a single file with its metadata provided as separate form fields.
+
       ```bash
-      curl -X POST http://localhost:5000/artifacts   -F "file=@myimage"   -F "metadata={\"filename\":\"myimage.png\",\"title\":\"powerpoint\",\"uploaded_by\":\"user123\"};type=application/json"
+      curl -X POST http://localhost:5000/artifacts \
+        -F "file=@myimage.png" \
+        -F "title=My Single Image" \
+        -F "drone_id=Drone-Alpha-007"
       ```
-      This uploads a file to MinIO, sends metadata to the `artifacts` Kafka topic, and triggers a notification on the `artifact_uploaded` topic.
 
-    - **Query artifacts in Postgres**:
-        ```bash
-        sudo docker exec -it postgres psql -U admin -d mydb -c "SELECT * FROM artifacts;"
-        ```
+      **2. Batch Upload**
 
-    - **Check MinIO bucket**:
-      Log in to [http://localhost:9001](http://localhost:9001) and verify files in the `artifacts` bucket.
+      Uploads multiple files at once. The metadata for *all* files must be provided as a single JSON string in the `metadata_map` field.
 
+      - `my_metadata.json`:
+
+      ```json
+      {
+        "myimage.png": {
+          "title": "Main Campus Building",
+          "drone_id": "Drone-Alpha-007"
+        },
+        "myimage2.png": {
+          "title": "Solar Panel Array 3",
+          "drone_id": "Drone-Juliet-009"
+        }
+      }
+      ```
+
+      - `curl` command:
+
+      ```bash
+      curl -X POST http://localhost:5000/artifacts \
+        -F "file=@myimage.png" \
+        -F "file=@myimage2.png" \
+        -F "metadata_map=$(< my_metadata.json)"
+      ```
+
+      *Note: the `$(<)` command only works on MacOS and Linux, better ways to handle this will be implemented in the future.*
+
+    #### Consume Data (Query)
+    #### `GET /artifacts`
+
+    Retrieves a list of all artifacts. It supports powerful filtering and field selection using query parameters.
+
+    - **Get all artifacts:**
+
+      ```bash
+      curl "http://localhost:5000/artifacts"
+      ```
+
+    - **Filter by a field:**
+
+      ```bash
+      curl "http://localhost:5000/artifacts?drone_id=Drone-Alpha-007"
+      ```
+
+    - **Select specific fields:**
+
+      ```bash
+      curl "http://localhost:5000/artifacts?fields=artifact_id,title"
+      ```
+
+    - **Combine filtering and field selection:**
+
+      ```bash
+      curl "http://localhost:5000/artifacts?drone_id=Drone-Alpha-007&fields=filename,location"
+      ```
+
+    #### `GET /artifacts.<artifact_id>`
+
+    Retrieves all data for a single, specific artifact by its ID.
+
+    ```bash
+    curl "http://localhost:5000/artifacts/3b62f2b9-3038-42ef-90c4-a0b490641af7"
+    ```
+
+7. **Check Postgres and MinIO**:
+
+  - **Query artifacts in Postgres**:
+
+      ```bash
+      sudo docker exec -it postgres psql -U admin -d mydb -c "SELECT * FROM artifacts;"
+      ```
+
+  - **Check MinIO bucket**:
+
+    Log in to [http://localhost:9001](http://localhost:9001) and verify files in the `artifacts` bucket.
+
+## Notes & Next Steps
+
+This repository contains the core data pipeline. The immediate next steps involve expanding the API's functionality and implementing authentication.
+
+### Next Steps
+- **Implement Authentication:** The API is currently open. The next critical step is to implement an authentication layer (e.g., API Keys or JWT) to secure all endpoints.
+- **Test on production server:** Check that all API functions can access the internal components of the production server.
+
+### Roadmap
+- **Expand API Functionality:** Add new, dedicated endpoints for other use cases.
+- **Create User-Facing Entry Points:** Build a user-facing application that uses this API to upload and visualize artifacts.
