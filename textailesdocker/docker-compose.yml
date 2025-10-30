@@ -119,11 +119,13 @@ services:
 
   api:
     build:
-      context: ../textailes-api 
+      context: ../textailes-api
       dockerfile: Dockerfile.api
     container_name: api
     ports:
       - "5000:5000"
+    environment:
+      - API_SECRET_KEY=${API_SECRET_KEY}
     depends_on:
       - kafka
       - minio
@@ -132,7 +134,7 @@ services:
 
   artifact_consumer:
     build:
-      context: ../textailes-api 
+      context: ../textailes-api
       dockerfile: Dockerfile.consumer
     container_name: artifact_consumer
     depends_on:

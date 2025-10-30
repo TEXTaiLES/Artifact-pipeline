@@ -9,6 +9,8 @@ from minio.error import S3Error
 import io
 from flasgger import Swagger
 import psycopg2
+import os
+from functools import wraps
 
 app = Flask(__name__)
 Swagger(app, config={
@@ -59,6 +61,25 @@ PG_PORT = '5432'
 PG_DB = 'mydb'
 PG_USER = 'admin'
 PG_PASSWORD = 'admin123'
+
+# Authentication requirement
+MASTER_API_KEY = os.environ.get('API_SECRET_KEY')
+
+def require_api_key(f):
+    """A decorator to check for a valid API key in the request header."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check if the key was provided in the 'Authorization' header
+        provided_key = request.headers.get('Authorization')
+
+        # Check if the key is valid (and that we have a master key set up)
+        if MASTER_API_KEY and provided_key == f"Bearer {MASTER_API_KEY}":
+            # Key is valid, proceed with the original function
+            return f(*args, **kwargs)
+        else:
+            # Key is missing or incorrect
+            return {'error': 'Unauthorized'}, 401
+    return decorated_function
 
 # Kafka configuration for event streaming
 KAFKA_BROKER = 'kafka:29092'  # Use Docker service name
@@ -126,6 +147,9 @@ def send_to_kafka_simple(topic, key, value):
         return False
 
 class ArtifactResource(Resource):
+    # Authentication
+    method_decorators = [require_api_key]
+
     def post(self):
         """Enhanced post method, allowing single-file
         or batch uploads using JSON metadata mapping"""
@@ -308,6 +332,9 @@ class ArtifactResource(Resource):
             return {'error': str(e)}, 500
 
 class ArtifactItemResource(Resource):
+    # Authentication
+    method_decorators = [require_api_key]
+
     def get(self, artifact_id):
         """Handle GET requests for a single artifact by its ID."""
         conn = None
