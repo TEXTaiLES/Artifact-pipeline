@@ -87,6 +87,18 @@ textailesdocker/
 
     The API provides endpoints for uploading (producing) and querying (consuming) artifacts.
 
+    The API is secured with an API key. All requests must provide this key in an `Authorization` header.
+
+    For local development, the API reads the key from an environment variable, which is set by the `docker-compose.yml` file.
+
+    #### Setup:
+    1. In the `textailesdocker` directory, create a file named `.env`.
+    2. Add your secret key to this file:
+        ```
+        API_SECRET_KEY=your-desired-key
+        ```
+    The `.env` file is included in `.gitignore`.
+
     #### Produce Data (Upload) `POST /artifacts`
 
     This endpoint handles file uploads. It supports two modes:
@@ -97,6 +109,7 @@ textailesdocker/
 
       ```bash
       curl -X POST http://localhost:5000/artifacts \
+        -H "Authorization: Bearer your-desired-key"
         -F "file=@myimage.png" \
         -F "title=My Single Image" \
         -F "drone_id=Drone-Alpha-007"
@@ -108,27 +121,28 @@ textailesdocker/
 
       - `my_metadata.json`:
 
-      ```json
-      {
-        "myimage.png": {
-          "title": "Main Campus Building",
-          "drone_id": "Drone-Alpha-007"
-        },
-        "myimage2.png": {
-          "title": "Solar Panel Array 3",
-          "drone_id": "Drone-Juliet-009"
+        ```json
+        {
+          "myimage.png": {
+            "title": "Main Campus Building",
+            "drone_id": "Drone-Alpha-007"
+          },
+          "myimage2.png": {
+            "title": "Solar Panel Array 3",
+            "drone_id": "Drone-Juliet-009"
+          }
         }
-      }
-      ```
+        ```
 
       - `curl` command:
 
-      ```bash
-      curl -X POST http://localhost:5000/artifacts \
-        -F "file=@myimage.png" \
-        -F "file=@myimage2.png" \
-        -F "metadata_map=$(< my_metadata.json)"
-      ```
+        ```bash
+        curl -X POST http://localhost:5000/artifacts \
+          -H "Authorization: Bearer your-desired-key"
+          -F "file=@myimage.png" \
+          -F "file=@myimage2.png" \
+          -F "metadata_map=$(< my_metadata.json)"
+        ```
 
       *Note: the `$(<)` command only works on MacOS and Linux, better ways to handle this will be implemented in the future.*
 
@@ -140,25 +154,25 @@ textailesdocker/
     - **Get all artifacts:**
 
       ```bash
-      curl "http://localhost:5000/artifacts"
+      curl -H "Authorization: Bearer your-desired-key" "http://localhost:5000/artifacts"
       ```
 
     - **Filter by a field:**
 
       ```bash
-      curl "http://localhost:5000/artifacts?drone_id=Drone-Alpha-007"
+      curl -H "Authorization: Bearer your-desired-key" "http://localhost:5000/artifacts?drone_id=Drone-Alpha-007"
       ```
 
     - **Select specific fields:**
 
       ```bash
-      curl "http://localhost:5000/artifacts?fields=artifact_id,title"
+      curl -H "Authorization: Bearer your-desired-key" "http://localhost:5000/artifacts?fields=artifact_id,title"
       ```
 
     - **Combine filtering and field selection:**
 
       ```bash
-      curl "http://localhost:5000/artifacts?drone_id=Drone-Alpha-007&fields=filename,location"
+      curl -H "Authorization: Bearer your-desired-key" "http://localhost:5000/artifacts?drone_id=Drone-Alpha-007&fields=filename,location"
       ```
 
     #### `GET /artifacts.<artifact_id>`
@@ -166,7 +180,7 @@ textailesdocker/
     Retrieves all data for a single, specific artifact by its ID.
 
     ```bash
-    curl "http://localhost:5000/artifacts/3b62f2b9-3038-42ef-90c4-a0b490641af7"
+    curl -H "Authorization: Bearer your-desired-key" "http://localhost:5000/artifacts/3b62f2b9-3038-42ef-90c4-a0b490641af7"
     ```
 
 7. **Check Postgres and MinIO**:
