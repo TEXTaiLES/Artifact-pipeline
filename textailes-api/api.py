@@ -50,8 +50,34 @@ def init_minio_bucket():
         if not minio_client.bucket_exists(MINIO_BUCKET):
             minio_client.make_bucket(MINIO_BUCKET)
             print(f"Created bucket: {MINIO_BUCKET}")
+
+        set_public_read_policy()
     except S3Error as e:
         print(f"Error creating bucket: {e}")
+
+# Set public read access policy on the bucket
+def set_public_read_policy():
+    """Set the bucket policy to allow public read (download) access."""
+    try:
+        policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"AWS": "*"},  # Allow any principal (public access)
+                    "Action": "s3:GetObject",  # Only allow read access
+                    "Resource": f"arn:aws:s3:::{MINIO_BUCKET}/*"
+                }
+            ]
+        }
+        # Convert the policy to a JSON string
+        policy_json = json.dumps(policy)
+
+        # Apply the policy
+        minio_client.set_bucket_policy(MINIO_BUCKET, policy_json)
+        print(f"Public read policy applied to bucket: {MINIO_BUCKET}")
+    except S3Error as e:
+        print(f"Error setting bucket policy: {e}")
 
 init_minio_bucket()
 
