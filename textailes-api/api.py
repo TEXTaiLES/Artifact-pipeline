@@ -13,6 +13,12 @@ import os
 from functools import wraps
 
 app = Flask(__name__)
+
+# Serve the static OpenAPI spec at /swagger.json
+@app.route('/swagger.json')
+def swagger_spec():
+    return send_from_directory('static', 'swagger.json')
+
 Swagger(app, config={
     'specs': [
         {
@@ -24,7 +30,7 @@ Swagger(app, config={
     ],
     'static_url_path': '/flasgger_static',
     'swagger_ui': True,
-    'specs_route': '/swagger',
+    'specs_route': '/docs',
     'headers': []
 })
 api = Api(app)
@@ -370,11 +376,6 @@ class ArtifactItemResource(Resource):
             if conn:
                 conn.close()
             return {'error': str(e)}, 500
-
-# Serve the static OpenAPI spec at /swagger.json
-@app.route('/swagger.json')
-def swagger_spec():
-    return send_from_directory('static', 'swagger.json')
 
 # Register API routes
 api.add_resource(ArtifactResource, '/artifacts')
