@@ -9,6 +9,7 @@ from minio.error import S3Error
 import io
 from flasgger import Swagger
 import psycopg2
+from urllib.parse import quote
 
 app = Flask(__name__)
 Swagger(app, config={
@@ -33,6 +34,10 @@ MINIO_ACCESS_KEY = 'minioadmin'
 MINIO_SECRET_KEY = 'minioadmin'
 MINIO_BUCKET = 'artifacts'
 
+# Public MinIO URL configuration (what clients use in URLs)
+PUBLIC_MINIO_ENDPOINT = os.getenv("PUBLIC_MINIO_ENDPOINT", "localhost:9000")
+PUBLIC_MINIO_SCHEME = os.getenv("PUBLIC_MINIO_SCHEME", "http")
+
 # Initialize MinIO client
 minio_client = Minio(
     MINIO_ENDPOINT,
@@ -48,10 +53,42 @@ def init_minio_bucket():
         if not minio_client.bucket_exists(MINIO_BUCKET):
             minio_client.make_bucket(MINIO_BUCKET)
             print(f"Created bucket: {MINIO_BUCKET}")
+
+        set_public_read_policy()
     except S3Error as e:
         print(f"Error creating bucket: {e}")
 
+# Set public read access policy on the bucket
+def set_public_read_policy():
+    """Set the bucket policy to allow public read (download) access."""
+    try:
+        policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"AWS": "*"},  # Allow any principal (public access)
+                    "Action": "s3:GetObject",  # Only allow read access
+                    "Resource": f"arn:aws:s3:::{MINIO_BUCKET}/*"
+                }
+            ]
+        }
+        # Convert the policy to a JSON string
+        policy_json = json.dumps(policy)
+
+        # Apply the policy
+        minio_client.set_bucket_policy(MINIO_BUCKET, policy_json)
+        print(f"Public read policy applied to bucket: {MINIO_BUCKET}")
+    except S3Error as e:
+        print(f"Error setting bucket policy: {e}")
+
 init_minio_bucket()
+
+def build_public_url(bucket_name: str, object_name: str) -> str:
+    """Build a public HTTP URL for an object in MinIO."""
+    # Encode path safely for URL
+    encoded_key = quote(object_name, safe='/')
+    return f"{PUBLIC_MINIO_SCHEME}://{PUBLIC_MINIO_ENDPOINT}/{bucket_name}/{encoded_key}"
 
 # Postgres configuration for accessing the database
 PG_HOST = 'postgres'
@@ -79,6 +116,7 @@ def send_to_kafka_with_schema(topic, key, value):
                     {"type": "string", "optional": True, "field": "title"},
                     {"type": "string", "optional": False, "field": "filename"},
                     {"type": "string", "optional": False, "field": "location"},
+                    {"type": "string", "optional": True, "field": "public_url"},
 
                     # New dummy datatype added
                     {"type": "string", "optional": True, "field": "drone_id"},
@@ -153,13 +191,15 @@ class ArtifactResource(Resource):
                 drone_id = metadata.get('drone_id', 'unknown_drone')
 
                 try:
-                    artifact_id, location = self.upload_file_to_kafka(
+                    artifact_id, location, public_url = self.upload_file_to_kafka(
                         file, filename, title, uploaded_by, drone_id
                     )
                     uploaded_artifacts.append({
                         "artifact_id": artifact_id,
+                        "drone_id": drone_id,
                         "location": location,
                         "filename": filename,
+                        "public_url": public_url,
                         "title": title
                     })
                 except Exception as e:
@@ -175,13 +215,18 @@ class ArtifactResource(Resource):
                 filename = file.filename
 
                 try:
-                    artifact_id, location = self.upload_file_to_kafka(
+                    artifact_id, location, public_url = self.upload_file_to_kafka(
                         file, filename, (title or filename), uploaded_by, drone_id
                     )
                     uploaded_artifacts.append({
                         "artifact_id": artifact_id,
+                        "drone_id": drone_id,
                         "location": location,
-                        "filename": filename
+                        "filename": filename,
+                        "public_url": public_url,
+                        "filename": filename,
+                        "title": (title or filename)
+
                     })
                 except Exception as e:
                     app.logger.error(f"Failed to upload file {filename}: {str(e)}")
@@ -218,11 +263,13 @@ class ArtifactResource(Resource):
 
         # 2. Create metadata record
         location = f"s3://{MINIO_BUCKET}/{object_name}"
+        public_url = build_public_url(MINIO_BUCKET, object_name)
         artifact_record = {
             "artifact_id": artifact_id,
             "title": title,
             "filename": filename,
             "location": location,
+            "public_url": public_url,
             "uploaded_by": uploaded_by,
             "timestamp": timestamp_millis,
             "drone_id": drone_id
@@ -242,7 +289,7 @@ class ArtifactResource(Resource):
         send_to_kafka_simple(ARTIFACT_UPLOADED_TOPIC, artifact_id, notification_event)
 
         # 5. Return the new ID and location
-        return artifact_id, location
+        return artifact_id, location, public_url
 
     def get(self):
         """Handle GET requests to fetch all artifacts,
