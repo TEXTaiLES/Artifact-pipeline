@@ -2,17 +2,44 @@
     "openapi": "3.0.0",
     "info": {
         "version": "1.0.0",
-        "title": "Artifact Upload API",
+        "title": "Data Lake API",
         "description": "API for uploading artifacts to MinIO with Kafka event streaming and Postgres persistence"
     },
     "servers": [
         {
-            "url": "http://localhost:5000",
-            "description": "Local development server"
+            "url": "http://textailes.athenarc.gr:5000",
+            "description": "ARC server"
         }
     ],
     "paths": {
         "/artifacts": {
+            "get": {
+                "tags": ["Artifacts"],
+                "summary": "Retrieve a list of artifacts",
+                "description": "Returns a list of artifact metadata.",
+                "responses": {
+                    "201": {
+                        "description": "Artifacts retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ArtifactResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Server error (e.g., MinIO or Kafka failure)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             "post": {
                 "tags": ["Artifacts"],
                 "summary": "Upload an artifact",
@@ -44,6 +71,43 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Server error (e.g., MinIO or Kafka failure)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/artifact": {
+            "get": {
+                "tags": ["Artifact"],
+                "summary": "Retrieve a single artifact",
+                "description": "Returns the metadata of an artifact.",
+                "parameters": [
+                    {
+                        "name": "artifact_id",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Artifacts retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ArtifactResponse"
                                 }
                             }
                         }

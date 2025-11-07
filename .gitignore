@@ -3,3 +3,4 @@
 textailesdocker/minio_data/
 textailesdocker/pg_data/
 textailesdocker/plugins/
+textailesdocker/.env
