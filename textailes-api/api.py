@@ -44,7 +44,7 @@ MINIO_BUCKET = 'artifacts'
 
 # Public MinIO URL configuration (what clients use in URLs)
 PUBLIC_MINIO_ENDPOINT = os.getenv("PUBLIC_MINIO_ENDPOINT", "localhost:9000")
-PUBLIC_MINIO_SCHEME = os.getenv("PUBLIC_MINIO_SCHEME", "http")
+PUBLIC_MINIO_SCHEME = os.getenv("PUBLIC_MINIO_SCHEME", "https")
 
 # Initialize MinIO client
 minio_client = Minio(
