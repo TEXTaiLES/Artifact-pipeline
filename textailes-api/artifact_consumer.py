@@ -17,9 +17,9 @@ GROUP_ID = 'artifact-notification-consumer'
 # PostgreSQL configuration
 PG_HOST = os.environ.get('PG_HOST', 'postgres')
 PG_PORT = os.environ.get('PG_PORT', '5432')
-PG_DB = os.environ.get('PG_DB', 'mydb')
-PG_USER = os.environ.get('PG_USER', 'admin')
-PG_PASSWORD = os.environ.get('PG_PASSWORD', 'admin123')
+PG_DB = os.environ.get('PG_DB')
+PG_USER = os.environ.get('PG_USER')
+PG_PASSWORD = os.environ.get('PG_PASSWORD')
 
 def ensure_timestamp_update_column():
     """
