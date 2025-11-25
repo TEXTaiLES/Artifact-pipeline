@@ -37,9 +37,9 @@ Swagger(app, config={
 api = Api(app)
 
 # MinIO configuration for object storage
-MINIO_ENDPOINT = 'minio:9000'  # Use Docker service name
-MINIO_ACCESS_KEY = 'minioadmin'
-MINIO_SECRET_KEY = 'minioadmin'
+MINIO_ENDPOINT = os.environ.get('MINIO_ENDPOINT', 'minio:9000')
+MINIO_ACCESS_KEY = os.environ.get('MINIO_ACCESS_KEY')
+MINIO_SECRET_KEY = os.environ.get('MINIO_SECRET_KEY')
 MINIO_BUCKET = 'artifacts'
 
 # Public MinIO URL configuration (what clients use in URLs)
@@ -99,11 +99,11 @@ def build_public_url(bucket_name: str, object_name: str) -> str:
     return f"{PUBLIC_MINIO_SCHEME}://{PUBLIC_MINIO_ENDPOINT}/{bucket_name}/{encoded_key}"
 
 # Postgres configuration for accessing the database
-PG_HOST = 'postgres'
-PG_PORT = '5432'
-PG_DB = 'mydb'
-PG_USER = 'admin'
-PG_PASSWORD = 'admin123'
+PG_HOST = os.environ.get('PG_HOST', 'postgres')
+PG_PORT = os.environ.get('PG_PORT', '5432')
+PG_DB = os.environ.get('PG_DB')
+PG_USER = os.environ.get('PG_USER')
+PG_PASSWORD = os.environ.get('PG_PASSWORD')
 
 # Authentication requirement
 MASTER_API_KEY = os.environ.get('API_SECRET_KEY')
