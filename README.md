@@ -1,16 +1,17 @@
-# Artifact Upload Service
+# HESTIA Data Pipeline
 
-This project provides a Dockerized environment for an artifact upload API with Kafka event streaming, Postgres persistence, MinIO (S3-compatible) storage, and Swagger UI for API documentation. The system is designed to handle file uploads, store them in MinIO, stream metadata through Kafka, persist data in Postgres, and update timestamps via a Kafka consumer.
+This project provides a Dockerized environment for a multi-modal data pipeline (HESTIA). It features an upload API with Kafka event streaming, Postgres persistence, MinIO (S3-compatible) storage, and Swagger UI for documentation. The system handles binary files (Artifacts) and structured data (Sensor Readings).
 
 ## Overview
 
 The system consists of the following components:
-- **Flask API**: A RESTful API built with Flask to handle artifact uploads and publish metadata to Kafka topics.
-- **Kafka**: Streams artifact metadata (`artifacts` topic) and notification events (`artifact_uploaded` topic).
-- **Kafka Connect**: Integrates Kafka with Postgres (via JDBC sink) and MinIO (via S3 sink) to persist data.
-- **Postgres**: Stores artifact metadata in a database.
-- **MinIO**: Stores uploaded files in an S3-compatible bucket (`artifacts`).
-- **Artifact Consumer**: Consumes notifications from the `artifact_uploaded` topic and updates timestamps in Postgres.
+- **Flask API**: A RESTful API built with Flask to handle uploads and queries. It uses an **API Key** for authentication.
+- **Kafka**: Streams metadata and events (`artifacts`, `sensor_readings`, `artifact_uploaded`).
+- **Kafka Connect**: Automatically syncs Kafka messages to Postgres (via JDBC sink).
+- **Postgres**: Stores structured metadata and sensor readings.
+- **MinIO**: Stores large binary files (images, logs, etc.) in an S3-compatible bucket.
+- **Artifact Consumer**: An internal service that reacts to upload events (e.g., to update timestamps or trigger processing).
+
 
 ![Architecture](textailesdocker/image.png)
 
@@ -18,191 +19,175 @@ The system consists of the following components:
 
 ## Prerequisites
 
-- [Docker](https://www.docker.com/get-started)
-- [Docker Compose](https://docs.docker.com/compose/)
-
+- [Docker](https://www.docker.com/get-started "null")
+- [Docker Compose](https://docs.docker.com/compose/ "null")
 
 ## Project Structure
 
 ```
 textailes-api/
-├── api.py                # Flask API for artifact uploads
-├── artifact_consumer.py  # Kafka consumer for notification processing
-├── Dockerfile.api        # Dockerfile for the API service
-├── Dockerfile.consumer   # Dockerfile for the artifact consumer service
-├── requirements.txt      # Python dependencies
-├── static/swagger.json   # Swagger UI
+├── api.py                  # Entry point for the Flask API
+├── utils.py                # Shared utilities (DB connection, Auth, Kafka wrappers)
+├── resources/              # API Resource definitions
+│   ├── artifact.py         # Logic for Artifacts (Files)
+│   └── sensor.py           # Logic for Sensor Readings (Data)
+├── artifact_consumer.py    # Internal Kafka consumer service
+├── Dockerfile.api          # Dockerfile for the API service
+├── Dockerfile.consumer     # Dockerfile for the consumer service
+├── requirements.txt        # Python dependencies
+├── static/swagger.json     # Swagger UI definition
 
 textailesdocker/
-├── connectors/           # Kafka Connect configuration files
-│   └── postgres-sink.json
-├── docker-compose.yml    # Docker Compose configuration
+├── connectors/             # Kafka Connect configuration files
+│   ├── postgres-sink.json  # Config for Artifacts table
+│   └── sensor-sink.json    # Config for Sensor Readings table
+├── docker-compose.yml      # Service orchestration
+├── .env.example            # Template for environment variables
 ```
 
-## Quick Start
+## Quick Start & Setup
 
-1. **Clone the repository**
+### 1. Clone the Repository
 
-   ```bash
-   git clone https://github.com/TEXTaiLES/Artifact-pipeline.git
-   cd  Artifact-pipeline
+```
+git clone https://github.com/TEXTaiLES/HESTIA.git
+cd HESTIA
+```
+
+### 2. Configure Security (.env)
+
+**Important:** You must set up your local secrets before starting the app.
+1. Navigate to the docker directory:
+
    ```
-
-2. **Start the services**
-
-   ```bash
    cd textailesdocker
-   sudo docker-compose up --build -d
    ```
+2. Copy the example environment file:
 
-3. **Access MinIO UI**
+   ```
+   cp .env.example .env
+   ```
+3. (Optional) Edit `.env` to change your `API_SECRET_KEY` or database passwords. *Default API Key:* `change-me-locally`
 
-   - URL: [http://localhost:9001](http://localhost:9001)
-   - Credentials:
-     - Username: `minioadmin`
-     - Password: `minioadmin`
+### 3. Start the Services
 
-4. **Access Swagegr UI**
+```
+sudo docker-compose up --build -d
+```
 
-   - Swagger UI: [http://localhost:5000/swagger](http://localhost:5000/swagger)
+*Wait about 60 seconds for Kafka and Kafka Connect to fully initialize.*
 
-5. **Register Kafka Connector**
+### 4. Register Kafka Connectors
 
-   - Postgres Sink (ensure `connectors/postgres-sink.json` exists):
-     ```bash
-     cd textailesdocker
-     ```
+You must register the bridges that connect Kafka to Postgres. Run these commands from the `textailesdocker` directory:
+- **Register Artifact Connector:**
 
-     ```bash
-     curl -X POST -H "Content-Type: application/json" \
-       --data @connectors/postgres-sink.json \
-       http://localhost:8083/connectors
-     ```
-   - Check the connector status:
+  ```
+  curl -X POST -H "Content-Type: application/json" \
+    --data @connectors/postgres-sink.json \
+    http://localhost:8083/connectors
+  ```
+- **Register Sensor Connector:**
 
-     ```bash
-     curl http://localhost:8083/connectors/artifact-sink/status
-     ```
-6. **API Endpoints [UPDATED]**
+  ```
+  curl -X POST -H "Content-Type: application/json" \
+    --data @connectors/sensor-sink.json \
+    http://localhost:8083/connectors
+  ```
 
-    The API provides endpoints for uploading (producing) and querying (consuming) artifacts.
+## API Reference
 
-    The API is secured with an API key. All requests must provide this key in an `Authorization` header.
+**Base URL:** `http://localhost:5000` **Authentication:** All requests must include the header: `Authorization: Bearer <YOUR_API_KEY>`
 
-    For local development, the API reads the key from an environment variable, which is set by the `docker-compose.yml` file.
+### 1. Artifacts (Files)
 
-    #### Setup:
-    1. In the `textailesdocker` directory, create a file named `.env`.
-    2. Add your secret key to this file:
-        ```
-        API_SECRET_KEY=your-desired-key
-        ```
-    The `.env` file is included in `.gitignore`.
+`POST /artifacts` (Upload)
 
-    #### Produce Data (Upload) `POST /artifacts`
+Supports Single File upload or Batch upload with a metadata map.
+- **Single File Example:**
 
-    This endpoint handles file uploads. It supports two modes:
+  ```
+  curl -X POST http://localhost:5000/artifacts \
+    -H "Authorization: Bearer change-me-locally" \
+    -F "file=@myimage.png" \
+    -F "title=My Single Image" \
+    -F "drone_id=Drone-Alpha-007"
+  ```
+- **Batch Upload Example:** Requires a `my_metadata.json` map file.
 
-      **1. Single File Upload**
+  ```
+  curl -X POST http://localhost:5000/artifacts \
+    -H "Authorization: Bearer change-me-locally" \
+    -F "file=@img1.png" \
+    -F "file=@img2.png" \
+    -F "metadata_map=$(< my_metadata.json)"
+  ```
 
-      Upload a single file with its metadata provided as separate form fields.
+`GET /artifacts` (Query)
 
-      ```bash
-      curl -X POST http://localhost:5000/artifacts \
-        -H "Authorization: Bearer your-desired-key"
-        -F "file=@myimage.png" \
-        -F "title=My Single Image" \
-        -F "drone_id=Drone-Alpha-007"
-      ```
+Get a list of artifacts. Supports filtering and field selection.
+- **List All:**
 
-      **2. Batch Upload**
+  ```
+  curl -H "Authorization: Bearer change-me-locally" "http://localhost:5000/artifacts"
+  ```
+- **Filter & Select Fields:**
 
-      Uploads multiple files at once. The metadata for *all* files must be provided as a single JSON string in the `metadata_map` field.
+  ```
+  curl -H "Authorization: Bearer change-me-locally" \
+    "http://localhost:5000/artifacts?drone_id=Drone-Alpha-007&fields=filename,location"
+  ```
 
-      - `my_metadata.json`:
+`GET /artifacts/<artifact_id>` (Get One)
 
-        ```json
-        {
-          "myimage.png": {
-            "title": "Main Campus Building",
-            "drone_id": "Drone-Alpha-007"
-          },
-          "myimage2.png": {
-            "title": "Solar Panel Array 3",
-            "drone_id": "Drone-Juliet-009"
-          }
-        }
-        ```
+Get details for a specific artifact.
 
-      - `curl` command:
+```
+curl -H "Authorization: Bearer change-me-locally" \
+  "http://localhost:5000/artifacts/3b62f2b9-3038-42ef-90c4-a0b490641af7"
+```
 
-        ```bash
-        curl -X POST http://localhost:5000/artifacts \
-          -H "Authorization: Bearer your-desired-key"
-          -F "file=@myimage.png" \
-          -F "file=@myimage2.png" \
-          -F "metadata_map=$(< my_metadata.json)"
-        ```
+### 2. Sensor Readings (Data)
 
-      *Note: the `$(<)` command only works on MacOS and Linux, better ways to handle this will be implemented in the future.*
+`POST /sensor-readings`
 
-    #### Consume Data (Query)
-    #### `GET /artifacts`
+Upload a single structured sensor reading.
 
-    Retrieves a list of all artifacts. It supports powerful filtering and field selection using query parameters.
+```
+curl -X POST http://localhost:5000/sensor-readings \
+  -H "Authorization: Bearer change-me-locally" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sensor_id": "Sensor-A1",
+    "temperature": 24.5,
+    "humidity": 60.2,
+    "uv_intensity": 4.5,
+    "timestamp": "2025-11-20T10:00:00Z"
+  }'
+```
 
-    - **Get all artifacts:**
+## Accessing Internal Components
 
-      ```bash
-      curl -H "Authorization: Bearer your-desired-key" "http://localhost:5000/artifacts"
-      ```
+### MinIO (Object Storage)
 
-    - **Filter by a field:**
+- **URL:** [http://localhost:9001](https://www.google.com/search?q=http://localhost:9001 "null")
+- **User:** `minioadmin` (or value in `.env`)
+- **Pass:** `minioadmin` (or value in `.env`)
 
-      ```bash
-      curl -H "Authorization: Bearer your-desired-key" "http://localhost:5000/artifacts?drone_id=Drone-Alpha-007"
-      ```
+### Postgres (Database)
 
-    - **Select specific fields:**
+To inspect the database tables directly:
 
-      ```bash
-      curl -H "Authorization: Bearer your-desired-key" "http://localhost:5000/artifacts?fields=artifact_id,title"
-      ```
+```
+sudo docker exec -it postgres psql -U admin -d mydb -c "\dt"
+```
 
-    - **Combine filtering and field selection:**
+Query the new sensor table:
 
-      ```bash
-      curl -H "Authorization: Bearer your-desired-key" "http://localhost:5000/artifacts?drone_id=Drone-Alpha-007&fields=filename,location"
-      ```
+```
+sudo docker exec -it postgres psql -U admin -d mydb -c "SELECT * FROM sensor_readings LIMIT 5;"
+```
 
-    #### `GET /artifacts.<artifact_id>`
+### Swagger UI (Auto-Documentation)
 
-    Retrieves all data for a single, specific artifact by its ID.
-
-    ```bash
-    curl -H "Authorization: Bearer your-desired-key" "http://localhost:5000/artifacts/3b62f2b9-3038-42ef-90c4-a0b490641af7"
-    ```
-
-7. **Check Postgres and MinIO**:
-
-  - **Query artifacts in Postgres**:
-
-      ```bash
-      sudo docker exec -it postgres psql -U admin -d mydb -c "SELECT * FROM artifacts;"
-      ```
-
-  - **Check MinIO bucket**:
-
-    Log in to [http://localhost:9001](http://localhost:9001) and verify files in the `artifacts` bucket.
-
-## Notes & Next Steps
-
-This repository contains the core data pipeline. The immediate next steps involve expanding the API's functionality and implementing authentication.
-
-### Next Steps
-- **Implement Authentication:** The API is currently open. The next critical step is to implement an authentication layer (e.g., API Keys or JWT) to secure all endpoints.
-- **Test on production server:** Check that all API functions can access the internal components of the production server.
-
-### Roadmap
-- **Expand API Functionality:** Add new, dedicated endpoints for other use cases.
-- **Create User-Facing Entry Points:** Build a user-facing application that uses this API to upload and visualize artifacts.
+- **URL:** [http://localhost:5000/docs](https://www.google.com/search?q=http://localhost:5000/docs "null")
