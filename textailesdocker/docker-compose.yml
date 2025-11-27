@@ -74,6 +74,20 @@ services:
     networks:
       - app-network
 
+  schema-registry:
+      image: confluentinc/cp-schema-registry:latest
+      container_name: schema-registry
+      depends_on:
+        - kafka
+      ports:
+        - "8081:8081"
+      environment:
+        SCHEMA_REGISTRY_HOST_NAME: schema-registry
+        SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka:9092'
+        SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      networks:
+        - app-network
+
   kafka-connect:
     image: confluentinc/cp-kafka-connect:latest
     container_name: kafka-connect
@@ -95,10 +109,9 @@ services:
       CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
-      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
-      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
-      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
       CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
       CONNECT_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       CONNECT_JDBC_USER: ${POSTGRES_USER}
