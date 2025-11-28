@@ -3,6 +3,7 @@ from flask_restful import Resource
 import uuid
 import io
 import json
+import logging
 from datetime import datetime, timezone
 
 from middleware.security import require_api_key
@@ -14,12 +15,13 @@ from services.storage import (
 )
 from services.messaging import (
     send_avro_message,
-    send_to_kafka_simple,
-    ARTIFACTS_TOPIC,
-    ARTIFACT_UPLOADED_TOPIC
+    send_simple_message,
+    TOPIC_ARTIFACTS,
+    TOPIC_ARTIFACT_UPLOADED
 )
 
-# --- Define Schema Here ---
+logger = logging.getLogger(__name__)
+
 ARTIFACT_AVRO_SCHEMA = """
 {
     "type": "record",
@@ -49,7 +51,7 @@ class ArtifactResource(Resource):
 
         uploaded_artifacts = []
 
-        # Batch Upload (Must have metadata_map)
+        # Batch Upload Logic
         if 'metadata_map' in request.form:
             try:
                 metadata_map = json.loads(request.form.get('metadata_map'))
@@ -70,37 +72,25 @@ class ArtifactResource(Resource):
                     )
                     if result: uploaded_artifacts.append(result)
                 except Exception as e:
-                    current_app.logger.error(f"Failed to upload file {filename}: {str(e)}")
+                    logger.error(f"Failed to upload file {filename}: {str(e)}")
 
-        # Single File Upload
+        # Single File Logic
         else:
-            # --- SAFETY CHECK: if multiple files but no metadata map, deny ---
             if len(files) > 1:
-                return {
-                    'error': 'Ambiguous request. You uploaded multiple files but did not provide a "metadata_map". '
-                             'For batch uploads, you must provide a JSON "metadata_map". '
-                             'For single file uploads, send only one file.'
-                }, 400
-            # --------------------
+                return {'error': 'Ambiguous request. For multiple files, use "metadata_map".'}, 400
 
             file = files[0]
-            filename = file.filename
-
-            title = request.form.get('title', '')
-            uploaded_by = request.form.get('uploaded_by', 'user123')
-            drone_id = request.form.get('drone_id', 'unknown_drone')
-
             try:
                 result = self.upload_single_file(
                     file,
-                    filename,
-                    (title or filename),
-                    uploaded_by,
-                    drone_id
+                    file.filename,
+                    request.form.get('title', file.filename),
+                    request.form.get('uploaded_by', 'user123'),
+                    request.form.get('drone_id', 'unknown_drone')
                 )
                 if result: uploaded_artifacts.append(result)
             except Exception as e:
-                current_app.logger.error(f"Failed to upload file {filename}: {str(e)}")
+                logger.error(f"Failed to upload file {file.filename}: {str(e)}")
 
         if not uploaded_artifacts:
             return {'error': 'File upload failed'}, 500
@@ -117,43 +107,38 @@ class ArtifactResource(Resource):
 
         # 1. Upload to MinIO
         file_data = file.read()
-        file_stream = io.BytesIO(file_data)
         object_name = f"{artifact_id}/{filename}"
 
         minio_client.put_object(
-            MINIO_BUCKET, object_name, file_stream, len(file_data),
+            MINIO_BUCKET, object_name, io.BytesIO(file_data), len(file_data),
             content_type=file.content_type or 'application/octet-stream'
         )
 
-        # 2. Create metadata record
+        # 2. Prepare Metadata
         location = f"s3://{MINIO_BUCKET}/{object_name}"
         public_url = build_public_url(MINIO_BUCKET, object_name)
 
-        artifact_record = {
+        record = {
             "artifact_id": artifact_id, "title": title, "filename": filename,
             "location": location, "public_url": public_url, "uploaded_by": uploaded_by,
             "timestamp": timestamp_millis, "drone_id": drone_id
         }
 
-        # 3. Send to Kafka
-        if not send_avro_message(ARTIFACTS_TOPIC, artifact_id, artifact_record, ARTIFACT_AVRO_SCHEMA):
+        # 3. Send to Kafka (Storage)
+        if not send_avro_message(TOPIC_ARTIFACTS, artifact_id, record, ARTIFACT_AVRO_SCHEMA):
             raise Exception(f"Failed to send artifact {artifact_id} to Kafka")
 
-        # 4. Send Notification
-        notification_event = {
+        # 4. Notify Listeners
+        notification = {
             "artifact_id": artifact_id, "event_type": "artifact_uploaded",
             "event_timestamp": datetime.now(timezone.utc).isoformat()
         }
-        send_to_kafka_simple(ARTIFACT_UPLOADED_TOPIC, artifact_id, notification_event)
+        send_simple_message(TOPIC_ARTIFACT_UPLOADED, artifact_id, notification)
 
-        # Return full object including drone_id
         return {
-            "artifact_id": artifact_id,
-            "drone_id": drone_id,
-            "location": location,
-            "filename": filename,
-            "public_url": public_url,
-            "title": title
+            "artifact_id": artifact_id, "drone_id": drone_id,
+            "location": location, "filename": filename,
+            "public_url": public_url, "title": title
         }
 
     def get(self):

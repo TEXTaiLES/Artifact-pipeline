@@ -1,19 +1,15 @@
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, jsonify
 from flask_restful import Api
 from flasgger import Swagger
+from datetime import datetime, timezone
 
-from services.storage import init_minio_bucket
-
-# --- Import resources from all subprojects ---
+# Resources
 from resources.artifact import ArtifactResource, ArtifactItemResource
 from resources.sensor import SensorReadingResource
 
-# Temporary placement, will move later
-init_minio_bucket()
-
 app = Flask(__name__)
 
-# Swagger Setup
+# Swagger Configuration
 @app.route('/swagger.json')
 def swagger_spec():
     return send_from_directory('static', 'swagger.json')
@@ -31,7 +27,7 @@ Swagger(app, config={
 
 api = Api(app)
 
-# ---Register Routes for all subprojects ---
+# Route Registration
 api.add_resource(ArtifactResource, '/artifacts')
 api.add_resource(ArtifactItemResource, '/artifacts/<string:artifact_id>')
 api.add_resource(SensorReadingResource, '/sensor-readings')

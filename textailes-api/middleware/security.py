@@ -2,10 +2,17 @@ import os
 from functools import wraps
 from flask import request
 
+# Configuration
 MASTER_API_KEY = os.environ.get('API_SECRET_KEY')
 
 def require_api_key(f):
-    """Decorator to require API Key authentication."""
+    """
+    Flask decorator to require API Key authentication header.
+
+    Usage:
+        @require_api_key
+        def get(self): ...
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
         provided_key = request.headers.get('Authorization')

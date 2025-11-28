@@ -3,6 +3,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from services.database import get_db_connection
 from services.storage import init_minio_bucket, set_public_read_policy
 
@@ -27,14 +28,14 @@ def run_migrations():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # 1. Add 'timestamp_update' to artifacts if missing
+        # Check and Add 'timestamp_update'
         cur.execute("""
             SELECT column_name
             FROM information_schema.columns
             WHERE table_name='artifacts' AND column_name='timestamp_update'
         """)
         if not cur.fetchone():
-            print("Migration: Adding 'timestamp_update' column to artifacts table.")
+            print("Migration: Adding 'timestamp_update' column.")
             cur.execute("""
                 ALTER TABLE artifacts
                 ADD COLUMN timestamp_update TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
