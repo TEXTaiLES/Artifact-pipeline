@@ -5,14 +5,16 @@ import io
 import json
 from datetime import datetime, timezone
 
-from utils import (
-    require_api_key,
-    get_db_connection,
+from middleware.security import require_api_key
+from services.database import get_db_connection
+from services.storage import (
     minio_client,
+    build_public_url,
+    MINIO_BUCKET
+)
+from services.messaging import (
     send_avro_message,
     send_to_kafka_simple,
-    build_public_url,
-    MINIO_BUCKET,
     ARTIFACTS_TOPIC,
     ARTIFACT_UPLOADED_TOPIC
 )

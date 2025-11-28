@@ -2,9 +2,14 @@ from flask import Flask, send_from_directory
 from flask_restful import Api
 from flasgger import Swagger
 
+from services.storage import init_minio_bucket
+
 # --- Import resources from all subprojects ---
 from resources.artifact import ArtifactResource, ArtifactItemResource
 from resources.sensor import SensorReadingResource
+
+# Temporary placement, will move later
+init_minio_bucket()
 
 app = Flask(__name__)
 

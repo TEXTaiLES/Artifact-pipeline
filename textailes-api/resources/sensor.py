@@ -3,11 +3,11 @@ from flask_restful import Resource
 from datetime import datetime, timezone
 import json
 
-from utils import (
-    require_api_key,
+from middleware.security import require_api_key
+from services.database import get_db_connection
+from services.messaging import (
     send_avro_message,
     send_to_kafka_simple,
-    get_db_connection,
     SENSOR_READINGS_TOPIC,
     SENSOR_READING_UPLOADED_TOPIC
 )
