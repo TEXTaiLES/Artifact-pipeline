@@ -8,7 +8,11 @@
     "servers": [
         {
             "url": "http://textailes.athenarc.gr:5000",
-            "description": "ARC server"
+            "description": "Production Server"
+        },
+        {
+            "url": "http://localhost:5000",
+            "description": "Local Development"
         }
     ],
     "paths": {
@@ -16,112 +20,64 @@
             "get": {
                 "tags": ["Artifacts"],
                 "summary": "Retrieve a list of artifacts",
-                "description": "Returns a list of artifact metadata.",
                 "responses": {
-                    "201": {
+                    "200": {
                         "description": "Artifacts retrieved successfully",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ArtifactResponse"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Server error (e.g., MinIO or Kafka failure)",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
+                        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ArtifactResponse" } } }
                     }
                 }
             },
             "post": {
                 "tags": ["Artifacts"],
                 "summary": "Upload an artifact",
-                "description": "Uploads a binary file to MinIO and sends metadata to Kafka for persistence in Postgres",
                 "requestBody": {
                     "required": true,
-                    "content": {
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ArtifactInput"
-                            }
-                        }
-                    }
+                    "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/ArtifactInput" } } }
                 },
                 "responses": {
-                    "201": {
-                        "description": "Artifact uploaded successfully",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ArtifactResponse"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid input (e.g., no file provided)",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Server error (e.g., MinIO or Kafka failure)",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
+                    "201": { "description": "Artifact uploaded successfully" }
                 }
             }
         },
-        "/artifact": {
+        "/artifact/{artifact_id}": {
             "get": {
-                "tags": ["Artifact"],
+                "tags": ["Artifacts"],
                 "summary": "Retrieve a single artifact",
-                "description": "Returns the metadata of an artifact.",
                 "parameters": [
-                    {
-                        "name": "artifact_id",
-                        "in": "path",
-                        "type": "string",
-                        "required": true
-                    }
+                    { "name": "artifact_id", "in": "path", "required": true, "schema": { "type": "string" } }
                 ],
                 "responses": {
-                    "201": {
-                        "description": "Artifacts retrieved successfully",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ArtifactResponse"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Server error (e.g., MinIO or Kafka failure)",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
+                    "200": { "description": "Artifact retrieved", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ArtifactResponse" } } } }
+                }
+            }
+        },
+        "/sensor-readings": {
+            "get": {
+                "tags": ["Sensors"],
+                "summary": "Retrieve sensor readings",
+                "parameters": [
+                    { "name": "sensor_id", "in": "query", "schema": { "type": "string" } },
+                    { "name": "start_date", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+                    { "name": "end_date", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+                    { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+                    { "name": "per_page", "in": "query", "schema": { "type": "integer", "default": 50 } }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of readings",
+                        "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/SensorReading" } } } }
                     }
+                }
+            },
+            "post": {
+                "tags": ["Sensors"],
+                "summary": "Submit a sensor reading",
+                "requestBody": {
+                    "required": true,
+                    "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SensorInput" } } }
+                },
+                "responses": {
+                    "201": { "description": "Reading saved" }
                 }
             }
         },
@@ -129,18 +85,8 @@
             "get": {
                 "tags": ["Health"],
                 "summary": "Health check",
-                "description": "Returns the health status of the API",
                 "responses": {
-                    "200": {
-                        "description": "API is healthy",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HealthResponse"
-                                }
-                            }
-                        }
-                    }
+                    "200": { "description": "API is healthy", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthResponse" } } } }
                 }
             }
         }
@@ -151,71 +97,52 @@
                 "type": "object",
                 "required": ["file"],
                 "properties": {
-                    "file": {
-                        "type": "string",
-                        "format": "binary",
-                        "description": "Binary file to upload"
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "Optional title for the artifact"
-                    },
-                    "filename": {
-                        "type": "string",
-                        "description": "Optional filename (defaults to uploaded file name)"
-                    },
-                    "uploaded_by": {
-                        "type": "string",
-                        "description": "Optional user ID of the uploader (defaults to 'user123')"
-                    }
+                    "file": { "type": "string", "format": "binary" },
+                    "title": { "type": "string" },
+                    "drone_id": { "type": "string" }
                 }
             },
             "ArtifactResponse": {
                 "type": "object",
                 "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "Success message"
-                    },
-                    "artifact_id": {
-                        "type": "string",
-                        "description": "Unique UUID identifier for the artifact"
-                    },
-                    "location": {
-                        "type": "string",
-                        "description": "S3-compatible URL of the uploaded file"
-                    },
-                    "filename": {
-                        "type": "string",
-                        "description": "Name of the uploaded file"
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "Title of the artifact"
-                    }
+                    "artifact_id": { "type": "string" },
+                    "filename": { "type": "string" },
+                    "location": { "type": "string" }
+                }
+            },
+            "SensorInput": {
+                "type": "object",
+                "required": ["sensor_id", "temperature", "humidity"],
+                "properties": {
+                    "sensor_id": { "type": "string", "example": "Sensor-A1" },
+                    "temperature": { "type": "number", "example": 24.5 },
+                    "humidity": { "type": "number", "example": 60.2 },
+                    "uv_intensity": { "type": "number", "example": 4.5 },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                }
+            },
+            "SensorReading": {
+                "type": "object",
+                "properties": {
+                    "sensor_id": { "type": "string" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "temperature": { "type": "number" },
+                    "humidity": { "type": "number" },
+                    "uv_intensity": { "type": "number" },
+                    "luminosity": { "type": "number" }
                 }
             },
             "HealthResponse": {
                 "type": "object",
                 "properties": {
-                    "status": {
-                        "type": "string",
-                        "description": "Health status of the API"
-                    },
-                    "timestamp": {
-                        "type": "string",
-                        "format": "date-time",
-                        "description": "Current timestamp in ISO format"
-                    }
+                    "status": { "type": "string" },
+                    "timestamp": { "type": "string" }
                 }
             },
             "Error": {
                 "type": "object",
                 "properties": {
-                    "error": {
-                        "type": "string",
-                        "description": "Error message"
-                    }
+                    "error": { "type": "string" }
                 }
             }
         }
