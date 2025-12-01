@@ -4,6 +4,9 @@ import psycopg2
 from functools import wraps
 from flask import request
 from confluent_kafka import Producer
+from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.schema_registry.avro import AvroSerializer
+from confluent_kafka.serialization import SerializationContext, MessageField
 from minio import Minio
 from minio.error import S3Error
 from urllib.parse import quote
@@ -19,6 +22,7 @@ PUBLIC_MINIO_SCHEME = os.environ.get("PUBLIC_MINIO_SCHEME", "https")
 
 # Kafka
 KAFKA_BROKER = os.environ.get('KAFKA_BROKER', 'kafka:29092')
+SCHEMA_REGISTRY_URL = os.environ.get('SCHEMA_REGISTRY_URL', 'http://schema-registry:8081')
 
 # --- This is where new topics are added ---
 ARTIFACTS_TOPIC = 'artifacts'
@@ -44,7 +48,10 @@ minio_client = Minio(
     secure=False
 )
 
-producer = Producer({'bootstrap.servers': KAFKA_BROKER})
+# Schema registry
+simple_producer = Producer({'bootstrap.servers': KAFKA_BROKER})
+schema_registry_conf = {'url': SCHEMA_REGISTRY_URL}
+schema_registry_client = SchemaRegistryClient(schema_registry_conf)
 
 # --- Helper Functions ---
 
@@ -96,24 +103,17 @@ def require_api_key(f):
         return {'error': 'Unauthorized'}, 401
     return decorated_function
 
-def send_to_kafka_with_schema(topic, key, value, schema_fields):
-    """Generic function to send data to Kafka with a specific JSON schema."""
+def send_avro_message(topic, key, value, schema_str):
+    """Serializes a message using Avro and sends it to Kafka."""
     try:
-        structured_message = {
-            "schema": {
-                "type": "struct",
-                "fields": schema_fields,
-                "optional": False,
-                "name": topic
-            },
-            "payload": value
-        }
-        producer.produce(
+        avro_serializer = AvroSerializer(schema_registry_client, schema_str)
+        serialized_value = avro_serializer(value, SerializationContext(topic, MessageField.VALUE))
+        simple_producer.produce(
             topic=topic,
             key=str(key).encode('utf-8'),
-            value=json.dumps(structured_message).encode('utf-8')
+            value=serialized_value
         )
-        producer.flush()
+        simple_producer.flush()
         print(f"Sent to Kafka topic {topic}: {key}")
         return True
     except Exception as e:
@@ -123,12 +123,12 @@ def send_to_kafka_with_schema(topic, key, value, schema_fields):
 def send_to_kafka_simple(topic, key, value):
     """Sends a simple JSON message without schema registry structure."""
     try:
-        producer.produce(
+        simple_producer.produce(
             topic=topic,
             key=str(key).encode('utf-8'),
             value=json.dumps(value).encode('utf-8')
         )
-        producer.flush()
+        simple_producer.flush()
         print(f"Sent to Kafka topic {topic}: {key}")
         return True
     except Exception as e:

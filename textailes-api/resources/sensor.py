@@ -5,12 +5,32 @@ import json
 
 from utils import (
     require_api_key,
-    send_to_kafka_with_schema,
+    send_avro_message,
     send_to_kafka_simple,
     get_db_connection,
     SENSOR_READINGS_TOPIC,
     SENSOR_READING_UPLOADED_TOPIC
 )
+
+# --- Define Schema Here ---
+SENSOR_AVRO_SCHEMA = """
+{
+    "type": "record",
+    "name": "SensorReading",
+    "namespace": "com.textailes.sensor",
+    "fields": [
+        {"name": "sensor_id", "type": "string"},
+        {"name": "timestamp", "type": "string"},
+        {"name": "temperature", "type": "float"},
+        {"name": "humidity", "type": "float"},
+        {"name": "uv_intensity", "type": ["null", "float"], "default": null},
+        {"name": "luminosity", "type": ["null", "float"], "default": null},
+        {"name": "atmospheric_pressure", "type": ["null", "int"], "default": null},
+        {"name": "elevation", "type": ["null", "float"], "default": null},
+        {"name": "artifact_id", "type": ["null", "string"], "default": null}
+    ]
+}
+"""
 
 class SensorReadingResource(Resource):
     method_decorators = [require_api_key]
@@ -98,25 +118,12 @@ class SensorReadingResource(Resource):
 
         message_key = f"{data['sensor_id']}_{data['timestamp']}"
 
-        # Schema definition
-        sensor_schema = [
-            {"type": "float", "optional": False, "field": "temperature"},
-            {"type": "float", "optional": False, "field": "humidity"},
-            {"type": "float", "optional": True, "field": "uv_intensity"},
-            {"type": "float", "optional": True, "field": "luminosity"},
-            {"type": "int32", "optional": True, "field": "atmospheric_pressure"},
-            {"type": "float", "optional": True, "field": "elevation"},
-            {"type": "string", "optional": False, "field": "timestamp"},
-            {"type": "string", "optional": False, "field": "sensor_id"},
-            {"type": "string", "optional": True, "field": "artifact_id"}
-        ]
-
         # 1. Send Data to Kafka (Storage)
-        success = send_to_kafka_with_schema(
+        success = send_avro_message(
             SENSOR_READINGS_TOPIC,
             message_key,
             data,
-            sensor_schema
+            SENSOR_AVRO_SCHEMA
         )
 
         if success:

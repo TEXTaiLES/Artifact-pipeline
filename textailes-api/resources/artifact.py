@@ -9,13 +9,32 @@ from utils import (
     require_api_key,
     get_db_connection,
     minio_client,
-    send_to_kafka_with_schema,
+    send_avro_message,
     send_to_kafka_simple,
     build_public_url,
     MINIO_BUCKET,
     ARTIFACTS_TOPIC,
     ARTIFACT_UPLOADED_TOPIC
 )
+
+# --- Define Schema Here ---
+ARTIFACT_AVRO_SCHEMA = """
+{
+    "type": "record",
+    "name": "ArtifactMetadata",
+    "namespace": "com.textailes.artifact",
+    "fields": [
+        {"name": "artifact_id", "type": "string"},
+        {"name": "title", "type": ["null", "string"], "default": null},
+        {"name": "filename", "type": "string"},
+        {"name": "location", "type": "string"},
+        {"name": "public_url", "type": ["null", "string"], "default": null},
+        {"name": "uploaded_by", "type": ["null", "string"], "default": null},
+        {"name": "timestamp", "type": ["null", "long"], "logicalType": "timestamp-millis", "default": null},
+        {"name": "drone_id", "type": ["null", "string"], "default": null}
+    ]
+}
+"""
 
 class ArtifactResource(Resource):
     method_decorators = [require_api_key]
@@ -108,17 +127,6 @@ class ArtifactResource(Resource):
         location = f"s3://{MINIO_BUCKET}/{object_name}"
         public_url = build_public_url(MINIO_BUCKET, object_name)
 
-        artifact_schema = [
-            {"type": "string", "optional": False, "field": "artifact_id"},
-            {"type": "string", "optional": True, "field": "title"},
-            {"type": "string", "optional": False, "field": "filename"},
-            {"type": "string", "optional": False, "field": "location"},
-            {"type": "string", "optional": True, "field": "public_url"},
-            {"type": "string", "optional": True, "field": "uploaded_by"},
-            {"type": "int64", "optional": True, "name": "org.apache.kafka.connect.data.Timestamp", "version": 1, "field": "timestamp"},
-            {"type": "string", "optional": True, "field": "drone_id"}
-        ]
-
         artifact_record = {
             "artifact_id": artifact_id, "title": title, "filename": filename,
             "location": location, "public_url": public_url, "uploaded_by": uploaded_by,
@@ -126,7 +134,7 @@ class ArtifactResource(Resource):
         }
 
         # 3. Send to Kafka
-        if not send_to_kafka_with_schema(ARTIFACTS_TOPIC, artifact_id, artifact_record, artifact_schema):
+        if not send_avro_message(ARTIFACTS_TOPIC, artifact_id, artifact_record, ARTIFACT_AVRO_SCHEMA):
             raise Exception(f"Failed to send artifact {artifact_id} to Kafka")
 
         # 4. Send Notification
