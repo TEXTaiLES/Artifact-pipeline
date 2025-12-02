@@ -1,18 +1,20 @@
 from flask import request, jsonify
 from flask_restful import Resource
 from datetime import datetime, timezone
-import json
+import logging
 
-from utils import (
-    require_api_key,
+from middleware.security import require_api_key
+from services.database import get_db_connection
+from services.messaging import (
     send_avro_message,
-    send_to_kafka_simple,
-    get_db_connection,
-    SENSOR_READINGS_TOPIC,
-    SENSOR_READING_UPLOADED_TOPIC
+    send_simple_message,
+    TOPIC_SENSOR_READINGS,
+    TOPIC_SENSOR_UPLOADED
 )
 
-# --- Define Schema Here ---
+logger = logging.getLogger(__name__)
+
+# Avro Schema Definition
 SENSOR_AVRO_SCHEMA = """
 {
     "type": "record",
@@ -36,13 +38,22 @@ class SensorReadingResource(Resource):
     method_decorators = [require_api_key]
 
     def get(self):
+        """
+        Retrieves sensor readings with optional filtering.
 
+        Query Params:
+            sensor_id (str): Filter by Sensor ID.
+            start_date (str): ISO date string.
+            end_date (str): ISO date string.
+            page (int): Pagination page number (default 1).
+            per_page (int): Items per page (default 50).
+        """
         conn = None
         try:
+            # 1. Parse Params
             sensor_id = request.args.get('sensor_id')
             start_date = request.args.get('start_date')
             end_date = request.args.get('end_date')
-
             try:
                 page = int(request.args.get('page', 1))
                 per_page = int(request.args.get('per_page', 50))
@@ -51,17 +62,16 @@ class SensorReadingResource(Resource):
 
             offset = (page - 1) * per_page
 
+            # 2. Build Query
             sql = "SELECT * FROM sensor_readings WHERE 1=1"
             params = []
 
             if sensor_id:
                 sql += " AND sensor_id = %s"
                 params.append(sensor_id)
-
             if start_date:
                 sql += " AND timestamp >= %s"
                 params.append(start_date)
-
             if end_date:
                 sql += " AND timestamp <= %s"
                 params.append(end_date)
@@ -69,15 +79,17 @@ class SensorReadingResource(Resource):
             sql += " ORDER BY timestamp DESC LIMIT %s OFFSET %s"
             params.extend([per_page, offset])
 
+            # 3. Execute
             conn = get_db_connection()
             cur = conn.cursor()
             cur.execute(sql, tuple(params))
 
             rows = cur.fetchall()
 
+            # Format results
+            results = []
             if cur.description:
                 colnames = [desc[0] for desc in cur.description]
-                results = []
                 for row in rows:
                     row_dict = {}
                     for col, val in zip(colnames, row):
@@ -86,8 +98,6 @@ class SensorReadingResource(Resource):
                         else:
                             row_dict[col] = val
                     results.append(row_dict)
-            else:
-                results = []
 
             cur.close()
             conn.close()
@@ -95,20 +105,19 @@ class SensorReadingResource(Resource):
             return jsonify(results)
 
         except Exception as e:
-            if conn:
-                conn.close()
+            logger.error(f"Error fetching sensors: {e}")
+            if conn: conn.close()
             return {'error': str(e)}, 500
 
     def post(self):
         """
-        Receive a single sensor reading, publish to Kafka, and notify listeners.
+        Ingests a new sensor reading, validates via Avro, and streams to Kafka.
         """
         data = request.get_json()
         if not data:
             return {'error': 'No data provided'}, 400
 
         # Validate
-        #  --- Flexibility in requirements ---
         required_fields = ['temperature', 'humidity', 'sensor_id']
         if not all(k in data for k in required_fields):
              return {'error': f'Missing required fields. Must include: {required_fields}'}, 400
@@ -118,22 +127,22 @@ class SensorReadingResource(Resource):
 
         message_key = f"{data['sensor_id']}_{data['timestamp']}"
 
-        # 1. Send Data to Kafka (Storage)
+        # 1. Send to Storage Topic (Avro)
         success = send_avro_message(
-            SENSOR_READINGS_TOPIC,
+            TOPIC_SENSOR_READINGS,
             message_key,
             data,
             SENSOR_AVRO_SCHEMA
         )
 
         if success:
-            notification_event = {
+            # 2. Notify Listeners (Simple JSON)
+            notification = {
                 "sensor_id": data['sensor_id'],
                 "event_type": "sensor_reading_received",
                 "event_timestamp": datetime.now(timezone.utc).isoformat()
             }
-            send_to_kafka_simple(SENSOR_READING_UPLOADED_TOPIC, message_key, notification_event)
+            send_simple_message(TOPIC_SENSOR_UPLOADED, message_key, notification)
+            return {'message': 'Reading received', 'id': message_key}, 201
 
-            return {'message': 'Sensor reading received', 'id': message_key}, 201
-        else:
-            return {'error': 'Failed to process reading'}, 500
+        return {'error': 'Failed to process reading'}, 500

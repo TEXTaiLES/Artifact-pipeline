@@ -6,5 +6,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY artifact_consumer.py .
+COPY services/ ./services/
 
 CMD ["python", "artifact_consumer.py"]
