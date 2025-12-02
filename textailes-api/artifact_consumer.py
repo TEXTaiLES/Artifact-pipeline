@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from confluent_kafka import Consumer, KafkaError
+from confluent_kafka import Consumer
 from datetime import datetime, timezone
 from services.database import get_db_connection
 
@@ -17,6 +17,9 @@ GROUP_ID = 'artifact-notification-consumer'
 def handle_notification(data: dict):
     """
     Updates the 'timestamp_update' field in Postgres when an artifact is uploaded.
+
+    Args:
+        data (dict): Data received from the Kafka consumer.
     """
     artifact_id = data.get('artifact_id')
     if not artifact_id:
@@ -31,6 +34,9 @@ def handle_notification(data: dict):
                 "UPDATE artifacts SET timestamp_update = %s WHERE artifact_id = %s",
                 (datetime.now(timezone.utc), artifact_id)
             )
+            if cur.rowcount == 0:
+                logger.warning(f"Artifact {artifact_id} not found for timestamp update")
+                return
             conn.commit()
             logger.info(f"Updated timestamp for: {artifact_id}")
         conn.close()
